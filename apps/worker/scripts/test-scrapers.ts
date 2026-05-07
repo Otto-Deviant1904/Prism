@@ -14,11 +14,35 @@ import {
   SavanaScraper,
   SephoraIndiaScraper,
   TataCliqScraper,
-  TiraScraper
+  TiraScraper,
+  universalSearch
 } from '@vogue/scrapers';
+
+async function testUniversalSearch(query: string): Promise<void> {
+  console.log('\n=== UNIVERSAL SEARCH TEST ===');
+  try {
+    const results = await universalSearch(query);
+    console.log(`Total results: ${results.length}`);
+    const stores = [...new Set(results.map((r) => r.store))];
+    console.log(`Stores found: ${stores.join(', ')}`);
+    if (results.length > 0) {
+      const prices = results.map((r) => r.price);
+      console.log(`Price range: ₹${Math.min(...prices)} - ₹${Math.max(...prices)}`);
+      results.slice(0, 5).forEach((r) =>
+        console.log(`  ${r.store} | ₹${r.price} | trust:${r.trustScore} | ${(r.rawTitle || '').slice(0, 50)}`)
+      );
+    }
+  } catch (error) {
+    console.error(`  ERROR: ${error}`);
+  }
+  console.log('=== END UNIVERSAL SEARCH TEST ===\n');
+}
 
 async function main(): Promise<void> {
   const query = process.argv[2] || 'lumi cream';
+
+  await testUniversalSearch(query);
+
   const scrapers = [
     new NykaaScraper(),
     new AmazonScraper(),

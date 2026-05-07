@@ -1,4 +1,5 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '../../.env' });
 import { prisma } from '@vogue/db';
 
 async function main(): Promise<void> {

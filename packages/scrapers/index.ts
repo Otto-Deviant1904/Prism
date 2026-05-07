@@ -14,3 +14,4 @@ export * from './hm-india';
 export * from './nykaa-fashion';
 export * from './generic';
 export * from './serper';
+export * from './universal';

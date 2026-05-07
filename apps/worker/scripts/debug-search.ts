@@ -1,4 +1,5 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ path: '../../.env' });
 import { chromium } from 'playwright';
 import { AmazonScraper, NykaaScraper, TiraScraper } from '@vogue/scrapers';
 

@@ -14,7 +14,8 @@ import {
   SavanaScraper,
   SephoraIndiaScraper,
   TataCliqScraper,
-  TiraScraper
+  TiraScraper,
+  universalSearch
 } from '@vogue/scrapers';
 import {
   classifyFailure,
@@ -144,7 +145,46 @@ const worker = new Worker(
 
     try {
       const storeRuns: StoreRun[] = [];
+      const universalStart = Date.now();
+      try {
+        const universalResults = await universalSearch(query);
+        log('worker.universal.result', {
+          query,
+          count: universalResults.length,
+          stores: [...new Set(universalResults.map((o) => o.store))].join(','),
+          durationMs: Date.now() - universalStart
+        });
+        if (universalResults.length >= 3) {
+          const byStore = new Map<Store, RawOffer[]>();
+          for (const offer of universalResults) {
+            const list = byStore.get(offer.store) || [];
+            list.push(offer);
+            byStore.set(offer.store, list);
+          }
+          for (const [store, offers] of byStore) {
+            storeRuns.push({
+              store,
+              status: 'OK',
+              reason: null,
+              offers,
+              durationMs: Date.now() - universalStart,
+              usedCacheFallback: false
+            });
+          }
+          await prisma.searchJob.update({
+            where: { id: jobId },
+            data: { status: 'PROCESSING' }
+          });
+        } else {
+          log('worker.universal.low_results', { query, count: universalResults.length, reason: 'falling back to per-store scrapers' });
+        }
+      } catch (error) {
+        log('worker.universal.error', { query, error: String(error) });
+      }
+
+      const universalStores = new Set(storeRuns.map((r) => r.store));
       for (const scraper of scrapers) {
+        if (universalStores.has(scraper.store)) continue;
         const runStart = Date.now();
         try {
           const offers = await scraper.search(query);
