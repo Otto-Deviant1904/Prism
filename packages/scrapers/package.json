@@ -1,0 +1,17 @@
+{
+  "name": "@vogue/scrapers",
+  "version": "0.1.0",
+  "description": "Playwright scrapers",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vogue/shared": "workspace:*",
+    "playwright": "^1.53.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

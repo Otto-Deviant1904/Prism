@@ -1,0 +1,29 @@
+{
+  "name": "voguevault",
+  "private": true,
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "lint": "turbo lint",
+    "format": "prettier --write \"**/*.{ts,tsx,md}\"",
+    "check:env": "node scripts/check-env.mjs",
+    "db:generate": "pnpm check:env && dotenv -e .env -- turbo db:generate",
+    "db:push": "pnpm check:env && dotenv -e .env -- turbo db:push",
+    "db:seed": "pnpm --filter @vogue/db db:seed",
+    "typecheck": "turbo typecheck",
+    "dev:full": "pnpm check:env && node scripts/dev-full.mjs",
+    "test:rc": "pnpm typecheck && pnpm --filter @vogue/web build && pnpm --filter @vogue/worker test:normalization && pnpm --filter @vogue/worker test:golden"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "dotenv": "^16.6.1",
+    "dotenv-cli": "^7.4.2",
+    "prettier": "^3.2.5",
+    "turbo": "^1.13.0",
+    "typescript": "^5.4.5"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "engines": {
+    "node": ">=20.10.0"
+  }
+}

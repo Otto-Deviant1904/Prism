@@ -1,0 +1,132 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Store {
+  AMAZON
+  NYKAA
+  TIRA
+  MYNTRA
+  AJIO
+  FLIPKART
+  SAVANA
+  SEPHORA_INDIA
+  PURPLLE
+  TATACLIQ
+  RELIANCE_TRENDS
+  HM_INDIA
+  NYKAA_FASHION
+}
+
+enum ReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum FeedbackType {
+  WRONG_MATCH
+  MISSING_PRODUCT
+  THUMBS_UP
+  THUMBS_DOWN
+}
+
+model Product {
+  id            String   @id @default(cuid())
+  slug          String   @unique
+  brand         String
+  name          String
+  category      String?
+  volume        String?
+  shade         String?
+  imageUrl      String?
+  
+  offers        Offer[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([brand])
+  @@index([name])
+}
+
+model Offer {
+  id           String   @id @default(cuid())
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  store        Store
+  externalId   String
+  url          String
+  price        Float
+  mrp          Float?
+  inStock      Boolean  @default(true)
+  imageUrl      String?
+  
+  rawTitle     String
+  normalizedTitle String
+  lastScraped  DateTime @default(now())
+
+  @@unique([store, externalId])
+  @@index([store, price])
+  @@index([productId])
+}
+
+model SearchJob {
+  id        String   @id @default(cuid())
+  query     String   @unique
+  status    String   @default("PENDING")
+  results   Json?    
+  updatedAt DateTime @updatedAt
+}
+
+model SearchEvent {
+  id          String   @id @default(cuid())
+  query       String
+  normalizedQuery String
+  eventType   String
+  status      String?
+  store       Store?
+  resultCount Int?
+  latencyMs   Int?
+  meta        Json?
+  createdAt   DateTime @default(now())
+
+  @@index([eventType, createdAt])
+  @@index([query])
+}
+
+model Feedback {
+  id          String       @id @default(cuid())
+  feedbackType FeedbackType
+  query       String?
+  productId   String?
+  offerId     String?
+  note        String?
+  createdAt   DateTime     @default(now())
+
+  @@index([feedbackType, createdAt])
+}
+
+model RejectedMatch {
+  id            String       @id @default(cuid())
+  store          Store
+  externalId     String
+  rawTitle       String
+  normalizedTitle String
+  candidateProductId String?
+  candidateProductName String?
+  confidence     Float
+  breakdown      Json
+  reasons        String[]
+  reviewStatus   ReviewStatus @default(PENDING)
+  createdAt      DateTime      @default(now())
+
+  @@unique([store, externalId, normalizedTitle])
+  @@index([reviewStatus, createdAt])
+}

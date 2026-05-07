@@ -1,0 +1,17 @@
+{
+  "name": "@vogue/shared",
+  "version": "0.1.0",
+  "description": "Shared types and normalization",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

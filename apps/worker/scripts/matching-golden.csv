@@ -1,0 +1,7 @@
+raw_title,canonical_brand,canonical_name,canonical_volume,expected_match
+Lakme Lumi Cream 30g,LAKME,lumi cream,30g,1
+Lakme Lumi Skin Cream with Illuminator 30 g,LAKME,lumi cream,30g,1
+Maybelline Fit Me Foundation 30ml,MAYBELLINE,fit me foundation,30ml,1
+Cetaphil Gentle Cleanser 125 ml,CETAPHIL,gentle cleanser,125ml,1
+Lakme Lumi Cream 15g,LAKME,lumi cream,30g,0
+Random Hair Oil 100ml,LAKME,lumi cream,30g,0
