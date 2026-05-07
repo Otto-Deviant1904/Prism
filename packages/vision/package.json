@@ -1,0 +1,13 @@
+{
+  "name": "@vogue/vision",
+  "version": "0.1.0",
+  "description": "Vision/AI product analysis for image search",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}

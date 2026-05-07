@@ -2,6 +2,7 @@ import { normalizeTitle, RawOffer, Store } from '@vogue/shared';
 import {
   createContext,
   extractProductPageHttp,
+  isProductPage,
   launchBrowser,
   logScraper,
   nowMs,
@@ -23,8 +24,9 @@ export async function genericSearch(config: GenericStoreConfig, query: string): 
   const googleResults = await serperSearch(config.domain, query);
 
   if (googleResults.length > 0) {
+    const productResults = googleResults.filter((gr) => isProductPage(gr.url, gr.title));
     const offers: RawOffer[] = [];
-    for (const gr of googleResults) {
+    for (const gr of productResults) {
       if (offers.length >= 8) break;
       try {
         const offer = await extractProductPage(config, gr.url);
@@ -41,6 +43,7 @@ export async function genericSearch(config: GenericStoreConfig, query: string): 
         store: config.store,
         query,
         googleResults: googleResults.length,
+        productPagesFiltered: productResults.length,
         productPagesExtracted: offers.length,
         durationMs: nowMs()
       });

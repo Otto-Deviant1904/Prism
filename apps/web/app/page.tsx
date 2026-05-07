@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
+import PhotoSearch from '@/components/PhotoSearch';
 
 type Offer = {
   id: string;
@@ -9,12 +10,14 @@ type Offer = {
   price: number;
   url: string;
   lastScraped: string;
+  imageUrl?: string | null;
 };
 
 type Product = {
   id: string;
   brand: string;
   name: string;
+  imageUrl?: string | null;
   volume?: string | null;
   offers: Offer[];
   staleOfferCount?: number;
@@ -26,23 +29,56 @@ type SearchStatusResponse = {
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'NOT_FOUND';
   results: Product[];
   degradedMode?: boolean;
-  storeStatus?: Record<string, { status: 'OK' | 'DEGRADED' | 'BLOCKED' | 'NO_RESULTS'; reason: string | null; usedCacheFallback: boolean }>;
+  storeStatus?: Record<string, { status: string; reason: string | null; usedCacheFallback: boolean }>;
   debug?: Record<string, unknown>;
 };
 
+type SortMode = 'price_asc' | 'best_value' | 'most_trusted';
+
+const STORE_INFO: Record<string, { displayName: string; trustScore: number }> = {
+  AMAZON: { displayName: 'Amazon', trustScore: 85 },
+  FLIPKART: { displayName: 'Flipkart', trustScore: 85 },
+  MYNTRA: { displayName: 'Myntra', trustScore: 88 },
+  AJIO: { displayName: 'Ajio', trustScore: 82 },
+  NYKAA: { displayName: 'Nykaa', trustScore: 95 },
+  NYKAA_FASHION: { displayName: 'Nykaa Fashion', trustScore: 90 },
+  TIRA: { displayName: 'Tira', trustScore: 90 },
+  SEPHORA_INDIA: { displayName: 'Sephora', trustScore: 80 },
+  PURPLLE: { displayName: 'Purplle', trustScore: 78 },
+  TATACLIQ: { displayName: 'Tata CLiQ', trustScore: 75 },
+  RELIANCE_TRENDS: { displayName: 'Reliance Trends', trustScore: 70 },
+  MEESHO: { displayName: 'Meesho', trustScore: 65 },
+  SAVANA: { displayName: 'Savana', trustScore: 60 },
+  HM_INDIA: { displayName: 'H&M', trustScore: 78 },
+};
+
 const DEMO_QUERIES = ['lumi cream', 'cetaphil cleanser', 'maybelline fit me foundation'];
+const SUGGESTED = ['black dress', 'moisturizer', 'red lipstick', 'kurta set'];
 const RECENT_KEY = 'voguevault:recent-searches';
+
+function trustColor(score: number): string {
+  if (score >= 80) return '#22C55E';
+  if (score >= 60) return '#EAB308';
+  return '#EF4444';
+}
+
+function storeInfo(store: string): { displayName: string; trustScore: number } {
+  return STORE_INFO[store] ?? { displayName: store.charAt(0) + store.slice(1).toLowerCase(), trustScore: 50 };
+}
+
+function formatPrice(n: number): string {
+  return '\u20B9' + n.toLocaleString('en-IN');
+}
 
 function SkeletonCard() {
   return (
-    <div className="animate-pulse rounded-2xl border border-rose-200 bg-white p-5">
-      <div className="mb-3 h-4 w-24 rounded bg-rose-100" />
-      <div className="mb-2 h-6 w-64 rounded bg-rose-100" />
-      <div className="mb-4 h-4 w-20 rounded bg-rose-100" />
-      <div className="space-y-2">
-        <div className="h-10 rounded bg-gray-100" />
-        <div className="h-10 rounded bg-gray-100" />
-      </div>
+    <div className="animate-pulse rounded-xl bg-[#1A1A24] p-3">
+      <div className="mb-3 aspect-square w-full rounded-lg bg-[#2A2A36]" />
+      <div className="mb-2 h-3 w-16 rounded bg-[#2A2A36]" />
+      <div className="mb-3 h-4 w-full rounded bg-[#2A2A36]" />
+      <div className="mb-3 h-4 w-3/4 rounded bg-[#2A2A36]" />
+      <div className="mb-3 h-6 w-20 rounded bg-[#2A2A36]" />
+      <div className="h-9 w-full rounded-lg bg-[#2A2A36]" />
     </div>
   );
 }
@@ -50,8 +86,13 @@ function SkeletonCard() {
 export default function SearchPage() {
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [submittedQuery, setSubmittedQuery] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
+  const [photoQueryText, setPhotoQueryText] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<SortMode>('price_asc');
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
   const debugMode = process.env.NEXT_PUBLIC_DEBUG_MODE === 'true';
 
   useEffect(() => {
@@ -69,18 +110,19 @@ export default function SearchPage() {
       const res = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ q })
+        body: JSON.stringify({ q }),
       });
       return (await res.json()) as { jobId: string; cachedResults?: Product[] | null };
     },
     onSuccess: (data) => {
       setJobId(data.jobId);
+      setSubmittedQuery(debouncedQuery);
       if (debouncedQuery) {
         const next = [debouncedQuery, ...recent.filter((r) => r !== debouncedQuery)].slice(0, 8);
         setRecent(next);
         localStorage.setItem(RECENT_KEY, JSON.stringify(next));
       }
-    }
+    },
   });
 
   const statusQuery = useQuery<SearchStatusResponse>({
@@ -90,179 +132,387 @@ export default function SearchPage() {
       return (await res.json()) as SearchStatusResponse;
     },
     enabled: Boolean(jobId),
-    refetchInterval: (q) => (q.state.data?.status === 'COMPLETED' || q.state.data?.status === 'FAILED' ? false : 1800)
+    refetchInterval: (q) => (q.state.data?.status === 'COMPLETED' || q.state.data?.status === 'FAILED' ? false : 1800),
   });
 
   const groupedResults = useMemo(
     () => (statusQuery.data?.results ?? []).map((p) => ({ ...p, offers: [...p.offers].sort((a, b) => a.price - b.price) })),
-    [statusQuery.data?.results]
+    [statusQuery.data?.results],
   );
 
   const isSearching = mutation.isPending || statusQuery.data?.status === 'PENDING' || statusQuery.data?.status === 'PROCESSING';
 
-  async function trackStoreClick(store: Offer['store'], queryText: string): Promise<void> {
-    await fetch('/api/track', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ eventType: 'STORE_CLICK', store, query: queryText, normalizedQuery: queryText })
-    });
-  }
+  const sortedResults = useMemo(() => {
+    const items = groupedResults;
+    switch (sortMode) {
+      case 'price_asc':
+        return [...items].sort((a, b) => (a.bestOffer?.price ?? Infinity) - (b.bestOffer?.price ?? Infinity));
+      case 'best_value': {
+        return [...items].sort((a, b) => {
+          const aPrice = a.bestOffer?.price ?? Infinity;
+          const bPrice = b.bestOffer?.price ?? Infinity;
+          const aTrust = a.bestOffer ? storeInfo(a.bestOffer.store).trustScore : 0;
+          const bTrust = b.bestOffer ? storeInfo(b.bestOffer.store).trustScore : 0;
+          return aPrice / aTrust - bPrice / bTrust;
+        });
+      }
+      case 'most_trusted': {
+        return [...items].sort((a, b) => {
+          const aTrust = a.bestOffer ? storeInfo(a.bestOffer.store).trustScore : 0;
+          const bTrust = b.bestOffer ? storeInfo(b.bestOffer.store).trustScore : 0;
+          return bTrust - aTrust || (a.bestOffer?.price ?? Infinity) - (b.bestOffer?.price ?? Infinity);
+        });
+      }
+      default:
+        return items;
+    }
+  }, [groupedResults, sortMode]);
 
-  async function sendFeedback(feedbackType: 'WRONG_MATCH' | 'MISSING_PRODUCT' | 'THUMBS_UP' | 'THUMBS_DOWN', productId?: string) {
-    await fetch('/api/feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feedbackType, query: debouncedQuery, productId })
-    });
-  }
+  const currentQuery = photoQueryText ?? submittedQuery;
+
+  const handleSearch = useCallback(() => {
+    if (debouncedQuery.length >= 2) {
+      setPhotoQueryText(null);
+      setPhotoPreview(null);
+      mutation.mutate(debouncedQuery);
+    }
+  }, [debouncedQuery, mutation]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') handleSearch();
+    },
+    [handleSearch],
+  );
+
+  const handlePhotoFile = useCallback(
+    (file: File) => {
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return;
+      if (file.size > 5 * 1024 * 1024) return;
+
+      const reader = new FileReader();
+      reader.onload = (e) => setPhotoPreview(e.target?.result as string);
+      reader.readAsDataURL(file);
+
+      setPhotoLoading(true);
+      setPhotoQueryText(null);
+      setQuery('Searching by image...');
+
+      const formData = new FormData();
+      formData.append('image', file);
+
+      fetch('/api/search/image', { method: 'POST', body: formData })
+        .then((r) => r.json())
+        .then((data) => {
+          setPhotoQueryText(data.query);
+          setQuery(data.query);
+          setPhotoPreview(null);
+          setPhotoLoading(false);
+          if (data.jobId) {
+            setJobId(data.jobId);
+            setSubmittedQuery(data.query);
+          }
+        })
+        .catch(() => {
+          setPhotoPreview(null);
+          setPhotoLoading(false);
+          setQuery('');
+        });
+    },
+    [],
+  );
+
+  const sortButtons: { key: SortMode; label: string }[] = [
+    { key: 'price_asc', label: 'Price \u2191' },
+    { key: 'best_value', label: 'Best Value' },
+    { key: 'most_trusted', label: 'Most Trusted' },
+  ];
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
-      <section className="mb-8 rounded-3xl border border-rose-200 bg-gradient-to-r from-rose-50 to-orange-50 p-6 sm:p-8">
-        <h1 className="text-3xl font-extrabold tracking-tight text-gray-900 sm:text-4xl">VogueVault</h1>
-        <p className="mt-2 text-sm text-gray-700 sm:text-base">Compare beauty prices across Nykaa, Amazon India, and Tira in one trusted view.</p>
-        <div className="mt-5 flex flex-col gap-3 sm:flex-row">
-          <input
-            className="w-full rounded-xl border border-rose-200 bg-white px-4 py-3 text-sm shadow-sm outline-none ring-rose-300 focus:ring"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search product name or paste product URL"
-          />
-          <button
-            onClick={() => mutation.mutate(debouncedQuery)}
-            disabled={debouncedQuery.length < 2 || mutation.isPending}
-            className="rounded-xl bg-rose-600 px-6 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-rose-300"
-          >
-            {mutation.isPending ? 'Searching...' : 'Compare Prices'}
-          </button>
-        </div>
+    <main className="min-h-screen bg-[#0F0F14] text-white">
+      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
+        {/* Header */}
+        <header className="mb-10 text-center">
+          <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl">
+            <span className="text-white">Vogue</span>
+            <span className="text-[#6C3CE1]">Vault</span>
+          </h1>
+          <p className="mt-2 text-sm text-gray-400 sm:text-base">
+            Find it cheaper. Anywhere in India.
+          </p>
+        </header>
 
-        <div className="mt-4 flex flex-wrap gap-2">
-          {DEMO_QUERIES.map((q) => (
-            <button key={q} onClick={() => setQuery(q)} className="rounded-full border border-rose-300 bg-white px-3 py-1 text-xs font-medium text-rose-700">
-              Demo: {q}
+        {/* Search Bar */}
+        <div className="mx-auto mb-8 max-w-2xl">
+          <div className="flex items-center gap-2 rounded-xl border border-[#2A2A36] bg-[#1A1A24] px-4 py-2 transition-colors focus-within:border-[#6C3CE1]">
+            {photoPreview ? (
+              <div className="relative h-8 w-8 flex-shrink-0 overflow-hidden rounded-md">
+                <img src={photoPreview} alt="" className="h-full w-full object-cover" />
+              </div>
+            ) : (
+              <svg className="h-5 w-5 flex-shrink-0 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            )}
+            <input
+              className="flex-1 bg-transparent text-base text-white placeholder-gray-500 outline-none"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Search product name..."
+            />
+            <PhotoSearch onFileSelect={handlePhotoFile} />
+            <button
+              onClick={handleSearch}
+              disabled={(query.length < 2 || query === 'Searching by image...') && !photoLoading}
+              className="rounded-lg bg-[#6C3CE1] px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#5B2ED1] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {mutation.isPending ? (
+                <span className="flex items-center gap-1.5">
+                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  Searching
+                </span>
+              ) : (
+                'Search'
+              )}
             </button>
-          ))}
-        </div>
+          </div>
 
-        {recent.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-2">
-            {recent.map((r) => (
-              <button key={r} onClick={() => setQuery(r)} className="rounded-full border border-gray-300 px-3 py-1 text-xs text-gray-700">
-                Recent: {r}
+          {/* Demo / Recent chips */}
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            {DEMO_QUERIES.map((q) => (
+              <button
+                key={q}
+                onClick={() => { setQuery(q); setDebouncedQuery(q); }}
+                className="rounded-full border border-[#2A2A36] px-3 py-1 text-xs text-gray-400 transition-colors hover:border-[#6C3CE1] hover:text-[#6C3CE1]"
+              >
+                {q}
+              </button>
+            ))}
+            {recent.length > 0 && recent.slice(0, 3).map((r) => (
+              <button
+                key={r}
+                onClick={() => { setQuery(r); setDebouncedQuery(r); }}
+                className="rounded-full border border-[#2A2A36] px-3 py-1 text-xs text-gray-500 transition-colors hover:border-gray-400 hover:text-gray-300"
+              >
+                {r}
               </button>
             ))}
           </div>
-        )}
-      </section>
 
-      {statusQuery.data?.storeStatus && (
-        <section className="mb-5 grid gap-2 sm:grid-cols-3">
-          {Object.entries(statusQuery.data.storeStatus).map(([store, s]) => {
-            const tone = s?.status === 'OK' ? 'bg-green-100 text-green-800 border-green-300' : s?.status === 'BLOCKED' ? 'bg-red-100 text-red-800 border-red-300' : s?.status === 'DEGRADED' ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-gray-100 text-gray-700 border-gray-300';
-            return (
-              <div key={store} className={`rounded-lg border px-3 py-2 text-xs ${tone}`}>
-                <p className="font-bold">{store}: {s?.status ?? 'NO_RESULTS'}</p>
-                <p>{s?.usedCacheFallback ? 'using cached fallback' : s?.reason ?? 'live'}</p>
-              </div>
-            );
-          })}
-        </section>
-      )}
+          {/* Photo loading indicator */}
+          {photoLoading && (
+            <div className="mt-3 flex items-center justify-center gap-2 text-sm text-gray-400">
+              <svg className="h-4 w-4 animate-spin text-[#6C3CE1]" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Analyzing image...
+            </div>
+          )}
+        </div>
 
-      {statusQuery.data?.degradedMode && (
-        <section className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          Some stores are temporarily unavailable. Showing best available results with cached/stale fallback where possible.
-        </section>
-      )}
-
-      {isSearching && (
-        <section className="space-y-4">
-          <p className="text-sm text-gray-600">Searching stores and validating matches...</p>
-          <SkeletonCard />
-          <SkeletonCard />
-        </section>
-      )}
-
-      {statusQuery.data?.status === 'FAILED' && (
-        <section className="rounded-xl border border-red-200 bg-red-50 p-4">
-          <p className="text-sm text-red-700">Search failed. Please retry.</p>
-          <button onClick={() => mutation.mutate(debouncedQuery)} className="mt-2 rounded bg-red-600 px-3 py-1 text-xs font-semibold text-white">
-            Retry Search
-          </button>
-        </section>
-      )}
-
-      {statusQuery.data?.status === 'COMPLETED' && groupedResults.length === 0 && (
-        <section className="rounded-xl border border-amber-200 bg-amber-50 p-5">
-          <p className="text-sm text-amber-800">No reliable matches found. We avoid showing uncertain comparisons.</p>
-          <button onClick={() => sendFeedback('MISSING_PRODUCT')} className="mt-3 rounded bg-amber-600 px-3 py-1 text-xs font-semibold text-white">
-            Report Missing Product
-          </button>
-        </section>
-      )}
-
-      {groupedResults.length > 0 && (
-        <section className="space-y-5">
-          {groupedResults.map((product) => (
-            <article key={product.id} className="rounded-2xl border border-rose-200 bg-white p-5 shadow-sm">
-              <div className="mb-3 flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-rose-600">{product.brand}</p>
-                  <h2 className="text-lg font-bold text-gray-900 sm:text-xl">{product.name}</h2>
-                  <p className="text-xs text-gray-500">{product.volume ?? 'Size not specified'} · updated {product.updatedMinutesAgo ?? '-'} mins ago</p>
-                  {product.staleOfferCount ? <p className="text-xs text-amber-700">Includes cached/stale store data</p> : null}
+        {/* Store status badges */}
+        {statusQuery.data?.storeStatus && debugMode && (
+          <section className="mb-6 grid gap-2 sm:grid-cols-3">
+            {Object.entries(statusQuery.data.storeStatus).map(([store, s]) => {
+              const info = storeInfo(store);
+              const dot = s.status === 'OK' ? '#22C55E' : s.status === 'BLOCKED' ? '#EF4444' : '#EAB308';
+              return (
+                <div key={store} className="flex items-center gap-2 rounded-lg border border-[#2A2A36] bg-[#1A1A24] px-3 py-2 text-xs text-gray-400">
+                  <span className="h-2 w-2 rounded-full" style={{ backgroundColor: dot }} />
+                  <span className="font-medium text-gray-300">{info.displayName}</span>
+                  <span>{s.status}</span>
                 </div>
-                {product.bestOffer && <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-700">Best Price ₹{product.bestOffer.price}</span>}
-              </div>
+              );
+            })}
+          </section>
+        )}
 
-              {product.staleOfferCount ? <p className="mb-2 text-xs text-amber-700">{product.staleOfferCount} stale offers hidden</p> : null}
+        {statusQuery.data?.degradedMode && (
+          <section className="mb-6 rounded-lg border border-[#EAB308]/20 bg-[#EAB308]/10 px-4 py-2 text-xs text-[#EAB308]">
+            Some stores are temporarily unavailable. Showing best available results.
+          </section>
+        )}
 
-              <div className="space-y-2">
-                {product.offers.map((offer, idx) => (
-                  <div key={offer.id} className={`flex items-center justify-between rounded-lg border px-3 py-2 ${idx === 0 ? 'border-green-300 bg-green-50' : 'border-gray-200 bg-gray-50'}`}>
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800">{offer.store}</p>
-                      <p className="text-xs text-gray-500">Updated {Math.max(1, Math.floor((Date.now() - new Date(offer.lastScraped).getTime()) / 60000))} mins ago</p>
+        {/* Result count + Sort */}
+        {currentQuery && sortedResults.length > 0 && (
+          <div className="mb-6 flex flex-col items-start justify-between gap-3 sm:flex-row sm:items-center">
+            <p className="text-sm text-gray-400">
+              <span className="font-semibold text-white">{sortedResults.length}</span> results for &quot;{currentQuery}&quot;
+            </p>
+            <div className="flex gap-1.5 rounded-lg bg-[#1A1A24] p-1">
+              {sortButtons.map((b) => (
+                <button
+                  key={b.key}
+                  onClick={() => setSortMode(b.key)}
+                  className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                    sortMode === b.key
+                      ? 'bg-[#6C3CE1] text-white'
+                      : 'text-gray-400 hover:text-white'
+                  }`}
+                >
+                  {b.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Failed state */}
+        {statusQuery.data?.status === 'FAILED' && (
+          <section className="mb-6 rounded-lg border border-[#EF4444]/20 bg-[#EF4444]/10 px-4 py-3 text-center">
+            <p className="text-sm text-[#EF4444]">Search failed. Please retry.</p>
+            <button onClick={() => mutation.mutate(debouncedQuery)} className="mt-2 rounded bg-[#EF4444] px-4 py-1.5 text-xs font-semibold text-white">
+              Retry
+            </button>
+          </section>
+        )}
+
+        {/* Loading skeleton */}
+        {isSearching && sortedResults.length === 0 && (
+          <div>
+            <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <SkeletonCard key={i} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Empty state */}
+        {statusQuery.data?.status === 'COMPLETED' && sortedResults.length === 0 && !isSearching && (
+          <section className="mx-auto max-w-md text-center">
+            <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-[#1A1A24]">
+              <svg className="h-8 w-8 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+            <p className="text-sm text-gray-400">No results found for &quot;{currentQuery}&quot;</p>
+            <p className="mt-1 text-xs text-gray-500">Try searching for something else:</p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {SUGGESTED.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => { setQuery(s); setDebouncedQuery(s); }}
+                  className="rounded-full border border-[#2A2A36] px-4 py-1.5 text-xs text-gray-400 transition-colors hover:border-[#6C3CE1] hover:text-[#6C3CE1]"
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Product grid */}
+        {sortedResults.length > 0 && (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {sortedResults.map((product) => {
+              const firstOffer = product.offers[0];
+              const bestOffer = product.bestOffer;
+              const info = bestOffer ? storeInfo(bestOffer.store) : { displayName: '', trustScore: 50 };
+              const imgSrc = product.imageUrl || firstOffer?.imageUrl;
+
+              return (
+                <article key={product.id} className="group flex flex-col rounded-xl bg-[#1A1A24] p-3 transition-colors hover:bg-[#22222E]">
+                  {/* Image */}
+                  <div className="mb-3 aspect-square w-full overflow-hidden rounded-lg bg-[#2A2A36]">
+                    {imgSrc ? (
+                      <img src={imgSrc} alt={product.name} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                    ) : (
+                      <div className="flex h-full items-center justify-center">
+                        <svg className="h-10 w-10 text-[#2A2A36]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
+                            d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Store + trust */}
+                  {bestOffer && (
+                    <div className="mb-1.5 flex items-center gap-1.5">
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: trustColor(info.trustScore) }} />
+                      <span className="text-xs font-medium text-gray-400">{info.displayName}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-base font-bold text-gray-900">₹{offer.price}</p>
+                  )}
+
+                  {/* Title */}
+                  <h3 className="mb-1 line-clamp-2 text-sm leading-snug text-gray-200">
+                    {product.brand} {product.name}
+                  </h3>
+
+                  {product.volume && (
+                    <p className="mb-2 text-xs text-gray-500">{product.volume}</p>
+                  )}
+
+                  {/* Spacer */}
+                  <div className="mt-auto flex items-center justify-between pt-2">
+                    {bestOffer && (
+                      <span className="text-xl font-bold text-[#6C3CE1]">{formatPrice(bestOffer.price)}</span>
+                    )}
+                    {bestOffer?.url && (
                       <a
-                        href={offer.url}
+                        href={bestOffer.url}
                         target="_blank"
                         rel="noreferrer"
-                        onClick={() => trackStoreClick(offer.store, debouncedQuery)}
-                        className="rounded bg-black px-3 py-1 text-xs font-semibold text-white"
+                        className="rounded-lg bg-[#6C3CE1] px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#5B2ED1]"
                       >
-                        Open
+                        View Deal
                       </a>
-                    </div>
+                    )}
                   </div>
-                ))}
-              </div>
 
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button onClick={() => sendFeedback('THUMBS_UP', product.id)} className="rounded border border-green-300 px-3 py-1 text-xs text-green-700">
-                  👍 Helpful
-                </button>
-                <button onClick={() => sendFeedback('THUMBS_DOWN', product.id)} className="rounded border border-red-300 px-3 py-1 text-xs text-red-700">
-                  👎 Not helpful
-                </button>
-                <button onClick={() => sendFeedback('WRONG_MATCH', product.id)} className="rounded border border-amber-300 px-3 py-1 text-xs text-amber-700">
-                  Report Wrong Match
-                </button>
-              </div>
-            </article>
-          ))}
-        </section>
-      )}
+                  {/* Other offers */}
+                  {product.offers.length > 1 && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs text-gray-500 hover:text-gray-300">
+                        {product.offers.length - 1} more offer{product.offers.length > 2 ? 's' : ''}
+                      </summary>
+                      <div className="mt-1 space-y-1">
+                        {product.offers.slice(1).map((offer) => {
+                          const oInfo = storeInfo(offer.store);
+                          return (
+                            <div key={offer.id} className="flex items-center justify-between rounded bg-[#2A2A36] px-2 py-1.5">
+                              <div className="flex items-center gap-1.5">
+                                <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: trustColor(oInfo.trustScore) }} />
+                                <span className="text-xs text-gray-400">{oInfo.displayName}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold text-gray-200">{formatPrice(offer.price)}</span>
+                                <a
+                                  href={offer.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="rounded bg-[#6C3CE1]/20 px-2 py-0.5 text-xs text-[#6C3CE1] transition-colors hover:bg-[#6C3CE1]/30"
+                                >
+                                  View
+                                </a>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </details>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
 
-      {debugMode && statusQuery.data?.debug && (
-        <section className="mt-8 rounded-xl border border-gray-300 bg-gray-50 p-3">
-          <p className="mb-2 text-xs font-bold uppercase text-gray-700">Debug Mode</p>
-          <pre className="overflow-x-auto text-xs text-gray-700">{JSON.stringify(statusQuery.data.debug, null, 2)}</pre>
-        </section>
-      )}
+        {/* Debug */}
+        {debugMode && statusQuery.data?.debug && (
+          <section className="mt-8 rounded-xl border border-[#2A2A36] bg-[#1A1A24] p-4">
+            <p className="mb-2 text-xs font-bold uppercase text-gray-500">Debug</p>
+            <pre className="overflow-x-auto text-xs text-gray-400">{JSON.stringify(statusQuery.data.debug, null, 2)}</pre>
+          </section>
+        )}
+      </div>
     </main>
   );
 }

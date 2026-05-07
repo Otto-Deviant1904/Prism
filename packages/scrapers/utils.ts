@@ -361,3 +361,45 @@ export async function fetchHtmlFallback(
     return [];
   }
 }
+
+export function isProductPage(url: string, title: string): boolean {
+  const lower = title.toLowerCase();
+
+  const categoryPhrases = [
+    'buy', 'shop', 'online', 'collection', 'explore our',
+    'for women', 'for men', 'latest', 'new arrivals',
+    'fashion & lifestyle', 'shopping',
+  ];
+  const titleLooksLikeCategory = categoryPhrases.some((p) =>
+    lower.includes(p)
+  ) && lower.length > 60;
+
+  try {
+    const u = new URL(url);
+    const path = u.pathname;
+
+    if (u.hostname.includes('myntra.com')) {
+      return /\/\d+\/buy/.test(path);
+    }
+    if (u.hostname.includes('flipkart.com')) {
+      return path.includes('/p/itm');
+    }
+    if (u.hostname.includes('amazon.in')) {
+      return path.includes('/dp/');
+    }
+    if (u.hostname.includes('tatacliq.com')) {
+      return path.includes('/p/');
+    }
+    if (u.hostname.includes('nykaa.com') ||
+        u.hostname.includes('nykaafashion.com')) {
+      return path.includes('/p/');
+    }
+    if (u.hostname.includes('ajio.com')) {
+      return path.includes('/p/');
+    }
+  } catch {
+    return false;
+  }
+
+  return !titleLooksLikeCategory;
+}
