@@ -3,6 +3,7 @@ import { IScraper } from './interface';
 import {
   captureFailureArtifacts,
   createContext,
+  extractProductPageHttp,
   fetchHtmlFallback,
   hydrateAndScroll,
   launchBrowser,
@@ -14,7 +15,7 @@ import {
   validateOfferShape,
   withRetries
 } from './utils';
-import { googleSiteSearch } from './google';
+import { serperSearch } from './serper';
 
 export class AmazonScraper implements IScraper {
   store = 'AMAZON' as const;
@@ -24,7 +25,7 @@ export class AmazonScraper implements IScraper {
   }
 
   async search(query: string): Promise<RawOffer[]> {
-    const googleResults = await googleSiteSearch('amazon.in', query);
+    const googleResults = await serperSearch('amazon.in', query);
     if (googleResults.length > 0) {
       const offers: RawOffer[] = [];
       for (const gr of googleResults) {
@@ -144,6 +145,9 @@ export class AmazonScraper implements IScraper {
   }
 
   async resolveUrl(url: string): Promise<RawOffer> {
+    const httpResult = await extractProductPageHttp(url, this.store, [], [], []);
+    if (httpResult) return httpResult;
+
     const browser = await launchBrowser(true);
     const context = await createContext(browser);
     const page = await context.newPage();

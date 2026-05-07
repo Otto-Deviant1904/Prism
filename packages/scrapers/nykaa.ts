@@ -3,6 +3,7 @@ import { IScraper } from './interface';
 import {
   captureFailureArtifacts,
   createContext,
+  extractProductPageHttp,
   fetchHtmlFallback,
   hydrateAndScroll,
   launchBrowser,
@@ -14,7 +15,7 @@ import {
   withRetries,
   withTimeout
 } from './utils';
-import { googleSiteSearch } from './google';
+import { serperSearch } from './serper';
 
 export class NykaaScraper implements IScraper {
   store = 'NYKAA' as const;
@@ -112,7 +113,7 @@ export class NykaaScraper implements IScraper {
   }
 
   async search(query: string): Promise<RawOffer[]> {
-    const googleResults = await googleSiteSearch('nykaa.com', query);
+    const googleResults = await serperSearch('nykaa.com', query);
     if (googleResults.length > 0) {
       const offers: RawOffer[] = [];
       for (const gr of googleResults) {
@@ -220,6 +221,9 @@ export class NykaaScraper implements IScraper {
   }
 
   async resolveUrl(url: string): Promise<RawOffer> {
+    const httpResult = await extractProductPageHttp(url, this.store, [], [], []);
+    if (httpResult) return httpResult;
+
     const browser = await launchBrowser(true);
     const context = await createContext(browser);
     const page = await context.newPage();

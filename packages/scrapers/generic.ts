@@ -8,7 +8,7 @@ import {
   safeGoto,
   withTimeout
 } from './utils';
-import { googleSiteSearch } from './google';
+import { serperSearch } from './serper';
 
 export type GenericStoreConfig = {
   store: Store;
@@ -20,7 +20,7 @@ export type GenericStoreConfig = {
 };
 
 export async function genericSearch(config: GenericStoreConfig, query: string): Promise<RawOffer[]> {
-  const googleResults = await googleSiteSearch(config.domain, query);
+  const googleResults = await serperSearch(config.domain, query);
 
   if (googleResults.length > 0) {
     const offers: RawOffer[] = [];
