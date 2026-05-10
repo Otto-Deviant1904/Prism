@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -58,7 +58,6 @@ export function cachedSerperCall<T>(
 
 export function clearSerperCache(): void {
   ensureCacheDir();
-  const { readdirSync, rmSync } = require('node:fs');
   for (const file of readdirSync(CACHE_DIR)) {
     rmSync(join(CACHE_DIR, file), { force: true });
   }

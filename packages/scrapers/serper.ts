@@ -121,12 +121,28 @@ export async function searchGoogleShopping(
     }>('shopping', params));
 
     const results: ShoppingResult[] = (data.shopping ?? []).map((item) => {
-      const priceStr = (item.price ?? '').replace(/[₹,\s]/g, '');
-      const priceNumeric = parseFloat(priceStr);
+      const rawItem = item as Record<string, unknown>;
+
+      // Log every field of the raw item to understand Serper's actual response shape
+      const loggedFields: Record<string, unknown> = { title: item.title?.slice(0, 60), rawPrice: item.price };
+      for (const [k, v] of Object.entries(rawItem)) {
+        if (k === 'title' || k === 'price') continue;
+        try { loggedFields[k] = typeof v === 'object' ? JSON.stringify(v).slice(0, 100) : v; } catch { loggedFields[k] = String(v); }
+      }
+      logScraper('serper.shopping.raw', loggedFields);
+
+      let priceNumeric = 0;
+
+      if (item.price != null) {
+        const raw = String(item.price);
+        const d = raw.match(/[\d,]+(?:\.\d{2})?/);
+        if (d) priceNumeric = parseFloat(d[0].replace(/,/g, ''));
+      }
+
       return {
         title: item.title ?? '',
-        price: item.price ?? '',
-        priceNumeric: Number.isFinite(priceNumeric) ? priceNumeric : 0,
+        price: typeof item.price === 'string' ? item.price : '',
+        priceNumeric: Number.isFinite(priceNumeric) && priceNumeric > 0 ? priceNumeric : 0,
         store: item.source ?? '',
         link: item.link ?? '',
         image: item.imageUrl ?? '',

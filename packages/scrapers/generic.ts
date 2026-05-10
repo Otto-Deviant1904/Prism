@@ -3,6 +3,7 @@ import {
   createContext,
   extractProductPageHttp,
   isProductPage,
+  isQueryRelevant,
   launchBrowser,
   logScraper,
   nowMs,
@@ -24,13 +25,25 @@ export async function genericSearch(config: GenericStoreConfig, query: string): 
   const googleResults = await serperSearch(config.domain, query);
 
   if (googleResults.length > 0) {
-    const productResults = googleResults.filter((gr) => isProductPage(gr.url, gr.title));
+    const productResults = googleResults.filter((gr) => isProductPage(gr.url, gr.title) && isQueryRelevant(query, gr.title, gr.url));
     const offers: RawOffer[] = [];
     for (const gr of productResults) {
       if (offers.length >= 8) break;
       try {
         const offer = await extractProductPage(config, gr.url);
         if (offer && offer.price > 0) {
+          // Secondary title validation: extracted title must contain at least one query word
+          const titleLower = offer.rawTitle.toLowerCase();
+          const queryWords = query.toLowerCase().split(' ').filter(w => w.length > 2);
+          const titleMatches = queryWords.length === 0 || queryWords.some(w => titleLower.includes(w));
+          if (!titleMatches) {
+            logScraper('scraper.generic.title.mismatch', {
+              url: gr.url,
+              extractedTitle: offer.rawTitle.slice(0, 80),
+              query,
+            });
+            continue;
+          }
           offers.push(offer);
         }
       } catch {

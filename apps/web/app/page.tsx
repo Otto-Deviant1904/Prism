@@ -443,7 +443,9 @@ export default function SearchPage() {
 
                   {/* Title */}
                   <h3 className="mb-1 line-clamp-2 text-sm leading-snug text-gray-200">
-                    {product.brand} {product.name}
+                    {product.brand && product.brand !== 'UNKNOWN' && product.brand !== ''
+                      ? `${product.brand} ${product.name}`
+                      : product.name}
                   </h3>
 
                   {product.volume && (

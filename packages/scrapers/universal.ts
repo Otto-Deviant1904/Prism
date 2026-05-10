@@ -1,6 +1,6 @@
 import { normalizeTitle, type RawOffer, type Store } from '@vogue/shared';
 import { searchGoogleShopping, serperSearch, type ShoppingResult } from './serper';
-import { isProductPage, logScraper } from './utils';
+import { isIndianHmUrl, isProductPage, isQueryRelevant, logScraper } from './utils';
 
 const STORE_TRUST_SCORES: Record<string, number> = {
   'amazon.in': 85,
@@ -52,6 +52,7 @@ const INDIAN_BEAUTY_DOMAINS = [
   'reliancetrends.com',
   'www2.hm.com',
   'nykaafashion.com',
+  'meesho.com',
 ];
 
 const getRawDomain = (link: string): string => {
@@ -67,6 +68,7 @@ function trustScoreForDomain(domain: string): number {
 }
 
 function displayNameForDomain(domain: string): string {
+  if (!domain) return 'Store';
   return DOMAIN_TO_DISPLAY_NAME[domain] ?? domain.charAt(0).toUpperCase() + domain.slice(1);
 }
 
@@ -84,10 +86,50 @@ const DOMAIN_TO_STORE: Record<string, Store> = {
   'reliancetrends.com': 'RELIANCE_TRENDS',
   'www2.hm.com': 'HM_INDIA',
   'nykaafashion.com': 'NYKAA_FASHION',
+  'meesho.com': 'MEESHO',
 };
 
 function domainToStore(domain: string): Store | null {
   return DOMAIN_TO_STORE[domain] ?? null;
+}
+
+function sourceToStoreInfo(source: string): {
+  store: Store;
+  trustScore: number;
+  displayName: string;
+} {
+  const normalized = source.toLowerCase()
+    .replace(/\.com.*/, '')
+    .replace(/\.in.*/, '')
+    .replace(/\s*-\s*.*/, '')
+    .trim();
+
+  const knownStores: Record<string, { store: Store; trust: number; display: string }> = {
+    nykaa: { store: 'NYKAA', trust: 95, display: 'Nykaa' },
+    'nykaa now': { store: 'NYKAA', trust: 95, display: 'Nykaa' },
+    myntra: { store: 'MYNTRA', trust: 88, display: 'Myntra' },
+    ajio: { store: 'AJIO', trust: 82, display: 'Ajio' },
+    amazon: { store: 'AMAZON', trust: 85, display: 'Amazon' },
+    flipkart: { store: 'FLIPKART', trust: 85, display: 'Flipkart' },
+    purplle: { store: 'PURPLLE', trust: 78, display: 'Purplle' },
+    tira: { store: 'TIRA', trust: 90, display: 'Tira' },
+    tatacliq: { store: 'TATACLIQ', trust: 75, display: 'Tata CLiQ' },
+    meesho: { store: 'MEESHO', trust: 65, display: 'Meesho' },
+    'shoppers stop': { store: 'OTHER', trust: 72, display: 'Shoppers Stop' },
+    '1mg': { store: 'OTHER', trust: 70, display: '1mg' },
+    pharmeasy: { store: 'OTHER', trust: 70, display: 'PharmEasy' },
+    apollo247: { store: 'OTHER', trust: 70, display: 'Apollo 247' },
+    bigbasket: { store: 'OTHER', trust: 68, display: 'BigBasket' },
+    smytten: { store: 'OTHER', trust: 60, display: 'Smytten' },
+    glamzy: { store: 'OTHER', trust: 55, display: 'Glamzy' },
+    'lakme india': { store: 'OTHER', trust: 60, display: 'Lakme India' },
+    'care to beauty': { store: 'OTHER', trust: 55, display: 'Care to Beauty' },
+  };
+
+  const match = knownStores[normalized] ?? knownStores[source.toLowerCase().replace(/\.com.*/, '').replace(/\.in.*/, '').trim()];
+  if (match) return { store: match.store, trustScore: match.trust, displayName: match.display };
+
+  return { store: 'OTHER' as Store, trustScore: 50, displayName: source };
 }
 
 export type UniversalOffer = RawOffer & {
@@ -96,21 +138,40 @@ export type UniversalOffer = RawOffer & {
   source: 'google_shopping' | 'google_web';
 };
 
-function shoppingToOffer(item: ShoppingResult): UniversalOffer | null {
+function shoppingToOffer(item: ShoppingResult, query: string): UniversalOffer | null {
   if (!item.link || !item.title) return null;
 
-  const domain = getRawDomain(item.link);
-  if (!domain) return null;
+  const info = sourceToStoreInfo(item.store);
 
-  const store = domainToStore(domain);
-  if (!store) return null;
+  logScraper('universal.shopping.result', {
+    url: item.link,
+    title: item.title?.slice(0, 60),
+    rawPrice: item.price,
+    parsedPrice: item.priceNumeric,
+    store: info.store,
+  });
+
+  if (item.priceNumeric === 0) {
+    logScraper('universal.price.rejected', { url: item.link, title: item.title?.slice(0, 60), rawPrice: item.price });
+    return null;
+  }
+
+  if (!isIndianHmUrl(item.link)) {
+    logScraper('universal.hm.rejected', { url: item.link, reason: 'non-Indian H&M locale' });
+    return null;
+  }
 
   if (!isProductPage(item.link, item.title)) return null;
+
+  if (!isQueryRelevant(query, item.title, item.link)) {
+    logScraper('universal.relevance.rejected', { url: item.link, title: item.title, query });
+    return null;
+  }
 
   const normalized = normalizeTitle(item.title);
 
   return {
-    store,
+    store: info.store,
     externalId: item.link.split('/').filter(Boolean).pop() || item.link,
     rawTitle: item.title,
     normalizedTitle: normalized.name,
@@ -119,8 +180,8 @@ function shoppingToOffer(item: ShoppingResult): UniversalOffer | null {
     imageUrl: item.image,
     inStock: true,
     scrapedAt: new Date().toISOString(),
-    trustScore: trustScoreForDomain(domain),
-    storeDisplayName: displayNameForDomain(domain),
+    trustScore: info.trustScore,
+    storeDisplayName: info.displayName,
     source: 'google_shopping',
   };
 }
@@ -128,9 +189,18 @@ function shoppingToOffer(item: ShoppingResult): UniversalOffer | null {
 function webResultToOffer(
   title: string,
   url: string,
-  store: Store
+  store: Store,
+  query: string
 ): UniversalOffer | null {
+  // H&M locale filter
+  if (!isIndianHmUrl(url)) return null;
+
   if (!isProductPage(url, title)) return null;
+
+  if (!isQueryRelevant(query, title, url)) {
+    logScraper('universal.relevance.rejected', { url, title, query });
+    return null;
+  }
 
   const domain = getRawDomain(url);
   const normalized = normalizeTitle(title);
@@ -161,6 +231,25 @@ function deduplicate(offers: UniversalOffer[]): UniversalOffer[] {
   });
 }
 
+function filterRelevantResults(results: UniversalOffer[], query: string): UniversalOffer[] {
+  const queryWords = query.toLowerCase().split(' ').filter(w => w.length > 2);
+  if (queryWords.length === 0) return results;
+
+  return results.filter(offer => {
+    const titleLower = offer.rawTitle.toLowerCase();
+    const matches = queryWords.some(word => titleLower.includes(word));
+    if (!matches) {
+      logScraper('universal.relevance.filtered', {
+        url: offer.url,
+        title: offer.rawTitle,
+        query,
+        reason: 'no query word found in title',
+      });
+    }
+    return matches;
+  });
+}
+
 export async function universalSearch(
   query: string
 ): Promise<UniversalOffer[]> {
@@ -169,7 +258,7 @@ export async function universalSearch(
   try {
     const shoppingResults = await searchGoogleShopping(query);
     for (const sr of shoppingResults) {
-      const offer = shoppingToOffer(sr);
+      const offer = shoppingToOffer(sr, query);
       if (offer) allResults.push(offer);
     }
     logScraper('universal.shopping.complete', {
@@ -182,7 +271,8 @@ export async function universalSearch(
   }
 
   if (allResults.length >= 10) {
-    const deduped = deduplicate(allResults);
+    let deduped = deduplicate(allResults);
+    deduped = filterRelevantResults(deduped, query);
     deduped.sort((a, b) => a.price - b.price);
     logScraper('universal.search.complete', {
       query,
@@ -204,7 +294,7 @@ export async function universalSearch(
         const store = domainToStore(domain);
         if (!store) continue;
         for (const r of results) {
-          const offer = webResultToOffer(r.title, r.url, store);
+          const offer = webResultToOffer(r.title, r.url, store, query);
           if (offer) allResults.push(offer);
         }
       }
@@ -217,7 +307,8 @@ export async function universalSearch(
     logScraper('universal.web.error', { query, error: String(error) });
   }
 
-  const deduped = deduplicate(allResults);
+  let deduped = deduplicate(allResults);
+  deduped = filterRelevantResults(deduped, query);
   deduped.sort((a, b) => a.price - b.price);
 
   logScraper('universal.search.complete', {

@@ -377,24 +377,39 @@ export function isProductPage(url: string, title: string): boolean {
   try {
     const u = new URL(url);
     const path = u.pathname;
+    const host = u.hostname;
 
-    if (u.hostname.includes('myntra.com')) {
+    // Reject review/rating/compare/question pages
+    if (/\/reviews?\b|\/ratings\b|\/questions\b|\/compare\b/.test(path)) return false;
+    if (u.hash.includes('reviews')) return false;
+
+    // Purplle: must contain /product/ and not /reviews
+    if (host.includes('purplle.com')) {
+      return path.includes('/product/') && !path.includes('/reviews');
+    }
+
+    // H&M: only accept Indian locale URLs
+    if (host.includes('hm.com')) {
+      if (!path.includes('/en_in/') && !path.includes('in_en')) return false;
+    }
+
+    if (host.includes('myntra.com')) {
       return /\/\d+\/buy/.test(path);
     }
-    if (u.hostname.includes('flipkart.com')) {
+    if (host.includes('flipkart.com')) {
       return path.includes('/p/itm');
     }
-    if (u.hostname.includes('amazon.in')) {
+    if (host.includes('amazon.in')) {
       return path.includes('/dp/');
     }
-    if (u.hostname.includes('tatacliq.com')) {
+    if (host.includes('tatacliq.com')) {
       return path.includes('/p/');
     }
-    if (u.hostname.includes('nykaa.com') ||
-        u.hostname.includes('nykaafashion.com')) {
+    if (host.includes('nykaa.com') ||
+        host.includes('nykaafashion.com')) {
       return path.includes('/p/');
     }
-    if (u.hostname.includes('ajio.com')) {
+    if (host.includes('ajio.com')) {
       return path.includes('/p/');
     }
   } catch {
@@ -402,4 +417,35 @@ export function isProductPage(url: string, title: string): boolean {
   }
 
   return !titleLooksLikeCategory;
+}
+
+export function isQueryRelevant(
+  query: string,
+  extractedTitle: string,
+  extractedUrl: string
+): boolean {
+  const queryWords = query.toLowerCase()
+    .split(' ')
+    .filter(w => w.length > 3);
+
+  if (queryWords.length === 0) return true;
+
+  const titleLower = extractedTitle.toLowerCase();
+  const urlLower = extractedUrl.toLowerCase();
+
+  const matchCount = queryWords.filter(word =>
+    titleLower.includes(word) || urlLower.includes(word)
+  ).length;
+
+  return matchCount / queryWords.length >= 0.5;
+}
+
+export function isIndianHmUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    if (!u.hostname.includes('hm.com')) return true;
+    return u.pathname.includes('/en_in/') || u.pathname.includes('in_en');
+  } catch {
+    return false;
+  }
 }

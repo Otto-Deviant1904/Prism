@@ -13,7 +13,9 @@ export const StoreEnum = z.enum([
   'TATACLIQ',
   'RELIANCE_TRENDS',
   'HM_INDIA',
-  'NYKAA_FASHION'
+  'NYKAA_FASHION',
+  'MEESHO',
+  'OTHER'
 ]);
 export type Store = z.infer<typeof StoreEnum>;
 
