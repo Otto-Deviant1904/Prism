@@ -53,6 +53,8 @@ function cacheKeyForQuery(q: string): string {
   return `search:result:${q}`;
 }
 
+const MAX_QUERY_LENGTH = 200;
+
 export async function POST(req: Request) {
   const rid = requestId();
   const startedAt = Date.now();
@@ -63,10 +65,20 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Invalid query' }, { status: 400 });
   }
 
+  if (parsed.data.q.length > MAX_QUERY_LENGTH) {
+    log('warn', 'api.search.query_too_long', { rid, length: parsed.data.q.length });
+    return NextResponse.json({ error: 'Query too long' }, { status: 400 });
+  }
+
   const q = normalizeQuery(parsed.data.q);
   const cache = getRedis();
   const cacheKey = cacheKeyForQuery(q);
-  const cached = await cache.get(cacheKey);
+  let cached: string | null = null;
+  try {
+    cached = await cache.get(cacheKey);
+  } catch (err) {
+    log('warn', 'api.search.cache_get_failed', { rid, error: String(err) });
+  }
 
   let job = await prisma.searchJob.findUnique({ where: { query: q } });
   const stale = !job || Date.now() - new Date(job.updatedAt).getTime() > 1000 * 60 * 30;
